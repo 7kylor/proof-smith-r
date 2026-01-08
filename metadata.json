@@ -1,0 +1,5 @@
+{
+  "name": "ProofSmith-R",
+  "description": "A mechanistic auto-scientist with calibrated RAG. It actively retrieves evidence, constructs causal scaffolds, synthesizes data for stress-testing, and generates evidence-bound protocols.",
+  "requestFramePermissions": []
+}
