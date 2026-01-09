@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 import { CausalGraphData, RAGSource, SimulationResult, CausalNode, VerificationCheck, StructuredReport } from "../types";
 
@@ -300,26 +301,55 @@ export const expandCausalNode = async (
 export const performCalibratedRAG = async (query: string): Promise<RAGSource[]> => {
   const ai = getClient();
   try {
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: `Find recent scientific papers regarding: ${query}.`,
-      config: { tools: [{ googleSearch: {} }] }
-    });
+    // ADVERSARIAL DISCOVERY: Perform parallel search for confirmation and contradictory evidence
+    const [confirmResponse, adversarialResponse] = await Promise.all([
+      ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: `Find recent scientific papers supporting or describing: ${query}.`,
+        config: { tools: [{ googleSearch: {} }] }
+      }),
+      ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: `Find recent scientific papers that CONTRADICT, challenge, provide adversarial evidence, or report failed replications regarding: ${query}.`,
+        config: { tools: [{ googleSearch: {} }] }
+      })
+    ]);
 
-    const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
-    const webSources = chunks
-      .filter((c: any) => c.web)
-      .map((c: any) => ({ title: c.web.title, url: c.web.uri }));
+    const getWebSources = (resp: any) => {
+      const chunks = resp.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+      return chunks
+        .filter((c: any) => c.web)
+        .map((c: any) => ({ title: c.web.title, url: c.web.uri }));
+    };
 
-    if (webSources.length === 0) {
+    const confirmSources = getWebSources(confirmResponse);
+    const adversarialSources = getWebSources(adversarialResponse);
+    
+    // Combine all discovered sources
+    const combinedWebSources = [
+      ...confirmSources,
+      ...adversarialSources
+    ];
+
+    // Remove duplicates by URL
+    const uniqueSources = Array.from(new Map(combinedWebSources.map(s => [s.url, s])).values());
+
+    if (uniqueSources.length === 0) {
       return [
         { title: "Review of Mechanisms (Simulated)", url: "#", snippet: "Simulated retrieval due to search limit or no results.", confidenceScore: 85, confidenceReason: "High relevance inference.", methodQuality: "Medium" }
       ];
     }
 
     const calibrationPrompt = `
-      Evaluate sources for "${query}". Assign Calibrated Confidence Score (0-100).
-      Sources: ${JSON.stringify(webSources)}
+      Evaluate the following scientific sources for "${query}". 
+      Assign a Calibrated Confidence Score (0-100) based on source reliability and methodology.
+      
+      ADVERSARIAL DISCOVERY TASK:
+      Identify if the source SUPPORTS or CONTRADICTS the target mechanisms/claims.
+      If a source provides contradictory/adversarial evidence (e.g., negative results, failed replication, or a challenging hypothesis), 
+      you MUST prefix the 'confidenceReason' with "[ADVERSARIAL EVIDENCE]".
+      
+      Sources: ${JSON.stringify(uniqueSources)}
     `;
 
     const calibResponse = await ai.models.generateContent({
