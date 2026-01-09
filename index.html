@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
   <head>
@@ -13,6 +14,14 @@
       ::-webkit-scrollbar-track { background: #f1f5f9; }
       ::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 4px; }
       ::-webkit-scrollbar-thumb:hover { background: #64748b; }
+      
+      /* Animation for live sync */
+      @keyframes pulse-sync {
+        0% { opacity: 0.4; }
+        50% { opacity: 1; }
+        100% { opacity: 0.4; }
+      }
+      .animate-sync { animation: pulse-sync 2s infinite; }
     </style>
   <script type="importmap">
 {
@@ -24,7 +33,9 @@
     "recharts": "https://aistudiocdn.com/recharts@^3.5.1",
     "@google/genai": "https://aistudiocdn.com/@google/genai@^1.31.0",
     "lucide-react": "https://aistudiocdn.com/lucide-react@^0.468.0",
-    "@heroicons/react/": "https://aistudiocdn.com/@heroicons/react@^2.2.0/"
+    "@heroicons/react/": "https://aistudiocdn.com/@heroicons/react@^2.2.0/",
+    "yjs": "https://esm.sh/yjs@13.6.22",
+    "y-webrtc": "https://esm.sh/y-webrtc@10.3.0?external=yjs"
   }
 }
 </script>

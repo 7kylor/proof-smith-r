@@ -1,20 +1,18 @@
+
 export enum AppStage {
-  INGEST = 'INGEST',
-  SCAFFOLD = 'SCAFFOLD',
-  RAG = 'RAG',
-  SYNTHESIS = 'SYNTHESIS',
-  VERIFICATION = 'VERIFICATION',
-  REPORT = 'REPORT'
+  DESIGN = 'DESIGN', // Ingest + Scaffold
+  VALIDATE = 'VALIDATE', // Calibrate + Synthesize
+  PROVE = 'PROVE', // Report
+  VERIFYING = 'VERIFYING' // Intermediate gating state
 }
 
 export interface CausalNode {
   id: string;
   label: string;
   type: 'variable' | 'outcome' | 'intervention';
-  // Simulation props
   value?: number; 
-  equation?: string; // e.g. "0.5 * x + 0.2"
-  currentValue?: number; // 0-1 normalized for UI
+  equation?: string;
+  currentValue?: number;
   min?: number;
   max?: number;
   unit?: string;
@@ -25,7 +23,7 @@ export interface CausalEdge {
   target: string;
   relationship: 'positive' | 'negative' | 'correlative';
   strength?: number;
-  weight?: number; // Coefficient for simulation
+  weight?: number;
 }
 
 export interface CausalGraphData {
@@ -37,7 +35,7 @@ export interface RAGSource {
   title: string;
   url: string;
   snippet: string;
-  confidenceScore: number; // 0-100 Calibrated score
+  confidenceScore: number;
   confidenceReason: string;
   methodQuality: 'High' | 'Medium' | 'Low';
 }
@@ -57,7 +55,7 @@ export interface TimePoint {
 export interface HeatmapCell {
   row: string;
   col: number;
-  value: number; // 0-1 intensity
+  value: number;
 }
 
 export interface ConfidenceBandPoint {
@@ -67,22 +65,18 @@ export interface ConfidenceBandPoint {
 }
 
 export interface RobustnessMetrics {
-  bootstrapStability: number; // 0-100
-  domainShiftResilience: number; // 0-100
-  leaveOneOutScore: number; // 0-100
+  bootstrapStability: number;
+  domainShiftResilience: number;
+  leaveOneOutScore: number;
   identifiability: 'Strong' | 'Weak' | 'None';
 }
 
 export interface SimulationResult {
   variableName: string;
-  // Panel A: Dose Response
   doseResponseData: SyntheticPoint[];
   bands: ConfidenceBandPoint[];
-  // Panel B: Time Course
   timeCourseData: TimePoint[];
-  // Panel C: Imaging/Heatmap
   heatmapData: HeatmapCell[];
-  // Stats
   statistics: {
     pValue: number;
     effectSize: number;
