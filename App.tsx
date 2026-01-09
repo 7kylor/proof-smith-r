@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import * as Y from 'yjs';
 import { WebrtcProvider } from 'y-webrtc';
+import { GoogleGenAI, Modality, LiveServerMessage, Blob } from '@google/genai';
 import { AppStage, CausalGraphData, RAGSource, SimulationResult, StructuredReport, VerificationCheck } from './types';
 import { extractCausalScaffold, performCalibratedRAG, runSynthesis, generateReviewerReport, expandCausalNode, runVerificationGates } from './services/gemini';
 import CausalView from './components/CausalView';
@@ -10,8 +11,8 @@ import ReportView from './components/ReportView';
 import { 
   Sparkles, ShieldCheck, AlertTriangle, Info, FileText, 
   ArrowLeft, RefreshCw, Search, Rocket, 
-  Mic, MicOff, BrainCircuit, Activity, Zap, Beaker, ChevronRight, Users, Wifi, ArrowRight, Loader2, Share2, UserPlus, Check, X, Clipboard, Link, ShieldAlert,
-  CheckCircle2
+  Mic, MicOff, BrainCircuit, Activity, Zap, Beaker, ChevronRight, Users, Wifi, ArrowRight, Loader2, Share2, Check, X, ShieldAlert,
+  CheckCircle2, ShieldCheck as ShieldIcon
 } from 'lucide-react';
 
 const steps = [
@@ -22,6 +23,28 @@ const steps = [
 
 const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#8b5cf6'];
 
+// Audio Utilities for Live API
+function encode(bytes: Uint8Array) {
+  let binary = '';
+  const len = bytes.byteLength;
+  for (let i = 0; i < len; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+
+function createBlob(data: Float32Array): Blob {
+  const l = data.length;
+  const int16 = new Int16Array(l);
+  for (let i = 0; i < l; i++) {
+    int16[i] = data[i] * 32768;
+  }
+  return {
+    data: encode(new Uint8Array(int16.buffer)),
+    mimeType: 'audio/pcm;rate=16000',
+  };
+}
+
 export default function App() {
   const [stage, setStage] = useState<AppStage>(AppStage.DESIGN);
   const [inputText, setInputText] = useState('');
@@ -31,8 +54,12 @@ export default function App() {
   const [isAutoRunning, setIsAutoRunning] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isRecording, setIsRecording] = useState(false);
-  const recognitionRef = useRef<any>(null);
-  
+
+  // Gemini Live Session Refs
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const liveSessionRef = useRef<any>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+
   const [scaffold, setScaffold] = useState<CausalGraphData | null>(null);
   const [ragSources, setRagSources] = useState<RAGSource[]>([]);
   const [synthesisData, setSynthesisData] = useState<SimulationResult | null>(null);
@@ -62,7 +89,7 @@ export default function App() {
       currentHash = Math.random().toString(36).substring(2, 12);
       window.location.hash = currentHash;
       setIsHost(true);
-      yAccess.set(myID, 'allowed'); // Auto-approve creator
+      yAccess.set(myID, 'allowed');
     } else {
       setIsHost(false);
     }
@@ -72,7 +99,6 @@ export default function App() {
     const name = `Researcher ${myID.split('_')[1]}`;
     const color = COLORS[Math.floor(Math.random() * COLORS.length)];
     
-    // Initial awareness state
     provider.awareness.setLocalStateField('user', { id: myID, name, color });
 
     provider.awareness.on('change', () => {
@@ -86,8 +112,6 @@ export default function App() {
       
       setPeers(activePeers);
 
-      // If I am admitted, I can see pending requests if I am the "host" or someone with power
-      // In this simple model, the person who created the room (first one in) or anyone allowed acts as an admin
       if (yAccess.get(myID) === 'allowed') {
         const requests = states
           .filter(([_, state]) => state.user && yAccess.get(state.user.id) !== 'allowed')
@@ -96,7 +120,6 @@ export default function App() {
       }
     });
 
-    // Check admission status for self
     const checkAdmission = () => {
       const accessStatus = yAccess.get(myID);
       if (accessStatus === 'allowed') {
@@ -132,7 +155,6 @@ export default function App() {
       yAccess.set(peerID, 'allowed');
       showToast(`Researcher admitted to workspace.`);
     } else {
-      // For now we just ignore, a more complex system would ban the client ID
       showToast(`Admission request ignored.`);
     }
     setPendingRequests(prev => prev.filter(r => r.id !== peerID));
@@ -242,40 +264,103 @@ export default function App() {
     setTimeout(() => setToastMessage(null), 4000);
   };
 
-  const initSpeechRecognition = () => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) return null;
-    const recognition = new SpeechRecognition();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = 'en-US';
-    recognition.onresult = (event: any) => {
-      let finalTranscript = '';
-      for (let i = event.resultIndex; i < event.results.length; ++i) {
-        if (event.results[i].isFinal) finalTranscript += event.results[i][0].transcript;
-      }
-      if (finalTranscript) handleInputChange(inputText + (inputText.length > 0 ? ' ' : '') + finalTranscript);
-    };
-    recognition.onerror = () => setIsRecording(false);
-    recognition.onend = () => setIsRecording(false);
-    return recognition;
+  // --- Gemini Live API Dictation Implementation ---
+  const toggleDictation = async () => {
+    if (isRecording) {
+      stopDictation();
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaStreamRef.current = stream;
+      
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+      audioContextRef.current = audioContext;
+
+      const sessionPromise = ai.live.connect({
+        model: 'gemini-2.5-flash-native-audio-preview-12-2025',
+        callbacks: {
+          onopen: () => {
+            setIsRecording(true);
+            setLoading(false);
+            showToast("Listening for causal research context...");
+            
+            const source = audioContext.createMediaStreamSource(stream);
+            const scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
+            
+            scriptProcessor.onaudioprocess = (audioProcessingEvent) => {
+              const inputData = audioProcessingEvent.inputBuffer.getChannelData(0);
+              const pcmBlob = createBlob(inputData);
+              sessionPromise.then((session) => {
+                session.sendRealtimeInput({ media: pcmBlob });
+              });
+            };
+            
+            source.connect(scriptProcessor);
+            scriptProcessor.connect(audioContext.destination);
+            (window as any)._proofSmithProcessor = scriptProcessor; // Keep alive
+          },
+          onmessage: async (message: LiveServerMessage) => {
+            if (message.serverContent?.inputTranscription) {
+              const text = message.serverContent.inputTranscription.text;
+              if (text) {
+                // Functional update to avoid stale closures
+                setInputText(prev => {
+                  const newVal = prev + (prev.length > 0 ? ' ' : '') + text;
+                  ydoc.transact(() => {
+                    yInput.delete(0, yInput.length);
+                    yInput.insert(0, newVal);
+                  });
+                  return newVal;
+                });
+              }
+            }
+          },
+          onerror: (e) => {
+            console.error("Live API Error:", e);
+            stopDictation();
+          },
+          onclose: () => {
+            setIsRecording(false);
+          }
+        },
+        config: {
+          responseModalities: [Modality.AUDIO],
+          inputAudioTranscription: {},
+          systemInstruction: 'You are a transcription engine for a scientific research workspace. Accurately transcribe the user\'s scientific descriptions into text. Keep responses extremely minimal or non-existent in audio modality.',
+        }
+      });
+
+      liveSessionRef.current = await sessionPromise;
+    } catch (e) {
+      console.error("Microphone Access Failed:", e);
+      showToast("Microphone access denied or failed.");
+      setLoading(false);
+    }
   };
 
-  useEffect(() => {
-    recognitionRef.current = initSpeechRecognition();
-    return () => { if (recognitionRef.current) try { recognitionRef.current.stop(); } catch(e) {} };
-  }, []);
-
-  const toggleDictation = () => {
-    if (!recognitionRef.current) return showToast("Speech recognition not supported.");
-    if (isRecording) {
-      try { recognitionRef.current.stop(); } catch (e) {}
-      setIsRecording(false);
-    } else {
-      try { recognitionRef.current.start(); setIsRecording(true); } catch (e) {
-        recognitionRef.current = initSpeechRecognition();
-      }
+  const stopDictation = () => {
+    if (liveSessionRef.current) {
+      liveSessionRef.current.close();
+      liveSessionRef.current = null;
     }
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach(track => track.stop());
+      mediaStreamRef.current = null;
+    }
+    if (audioContextRef.current) {
+      audioContextRef.current.close();
+      audioContextRef.current = null;
+    }
+    if ((window as any)._proofSmithProcessor) {
+      (window as any)._proofSmithProcessor.disconnect();
+      delete (window as any)._proofSmithProcessor;
+    }
+    setIsRecording(false);
+    showToast("Dictation stopped.");
   };
 
   return (
@@ -452,8 +537,8 @@ export default function App() {
                 </header>
                 <div className="relative mb-8 group">
                   <textarea value={inputText} onChange={(e) => handleInputChange(e.target.value)} placeholder="Enter scientific abstract or study parameters..." className="w-full h-80 p-8 bg-slate-50 border-2 border-slate-100 rounded-[2.5rem] focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 focus:bg-white outline-none resize-none text-slate-700 font-mono text-sm leading-relaxed transition-all" />
-                  <button onClick={toggleDictation} className={`absolute bottom-6 right-6 w-14 h-14 rounded-2xl shadow-xl flex items-center justify-center transition-all ${isRecording ? 'bg-red-500 text-white animate-pulse' : 'bg-white text-indigo-600 border border-indigo-100 hover:bg-indigo-50 hover:scale-105 active:scale-95'}`}>
-                    {isRecording ? <MicOff size={24} /> : <Mic size={24} />}
+                  <button onClick={toggleDictation} disabled={loading} className={`absolute bottom-6 right-6 w-14 h-14 rounded-2xl shadow-xl flex items-center justify-center transition-all ${isRecording ? 'bg-red-500 text-white animate-pulse' : 'bg-white text-indigo-600 border border-indigo-100 hover:bg-indigo-50 hover:scale-105 active:scale-95'} ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                    {loading ? <Loader2 size={24} className="animate-spin" /> : isRecording ? <MicOff size={24} /> : <Mic size={24} />}
                   </button>
                 </div>
                 <div className="bg-slate-50 p-8 rounded-[2rem] border border-slate-100">
@@ -588,7 +673,6 @@ export default function App() {
         <div className="fixed bottom-10 right-10 left-[calc(18rem+2.5rem)] z-[60] flex items-center justify-end pointer-events-none">
           {stage !== AppStage.VERIFYING && stage !== AppStage.JOINING && (
             <div className="flex items-center gap-4 pointer-events-auto animate-in slide-in-from-bottom-6 duration-500">
-              {/* Contextual Status / Back button */}
               {(stage === AppStage.VALIDATE || stage === AppStage.PROVE) && !isAutoRunning && (
                 <button 
                   onClick={() => setStage(AppStage.DESIGN)} 
@@ -598,7 +682,6 @@ export default function App() {
                 </button>
               )}
 
-              {/* Main Action Pill */}
               <div className="bg-slate-900 text-white h-20 rounded-[2.5rem] flex items-center px-3 gap-3 shadow-2xl border border-white/10 ring-8 ring-slate-900/5 min-w-[320px]">
                 {stage === AppStage.DESIGN && (
                   <>
@@ -607,7 +690,7 @@ export default function App() {
                       disabled={loading || !inputText} 
                       className="flex-1 h-14 px-8 rounded-3xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-black text-sm tracking-tight transition-all flex items-center justify-center gap-3 shadow-lg active:scale-95"
                     >
-                      {loading ? <Loader2 size={20} className="animate-spin" /> : <Sparkles size={20} />}
+                      {loading && !isRecording ? <Loader2 size={20} className="animate-spin" /> : <Sparkles size={20} />}
                       {scaffold ? 'Re-Analyze Context' : 'Extract Mechanistic Model'}
                     </button>
                     {scaffold && !loading && (
