@@ -1,10 +1,11 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { AppStage, CausalGraphData, RAGSource, SimulationResult, StructuredReport, VerificationCheck } from './types';
 import { extractCausalScaffold, performCalibratedRAG, runSynthesis, generateReviewerReport, expandCausalNode, mergeGraphs, runVerificationGates, parameterizeScaffold } from './services/gemini';
 import CausalView from './components/CausalView';
 import SynthesisView from './components/SynthesisView';
 import ReportView from './components/ReportView';
-import { Sparkles, ShieldCheck, AlertTriangle, Info, UploadCloud, FileText, X, Link, Type, CheckCircle2, Lock, XCircle, ArrowLeft, RefreshCw, AlertCircle, PlayCircle, Calculator, Plus, Search, Trash2, Rocket } from 'lucide-react';
+import { Sparkles, ShieldCheck, AlertTriangle, Info, UploadCloud, FileText, X, Link, Type, CheckCircle2, Lock, XCircle, ArrowLeft, RefreshCw, AlertCircle, PlayCircle, Calculator, Plus, Search, Trash2, Rocket, Mic, MicOff } from 'lucide-react';
 
 // Icons (Inline SVG for simplicity)
 const BeakerSvg = () => <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" /></svg>;
@@ -30,6 +31,8 @@ export default function App() {
   const [isExpanding, setIsExpanding] = useState(false);
   const [isAutoRunning, setIsAutoRunning] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const recognitionRef = useRef<any>(null);
   
   // App Data State
   const [scaffold, setScaffold] = useState<CausalGraphData | null>(null);
@@ -40,6 +43,63 @@ export default function App() {
   
   // Verification State
   const [verificationChecks, setVerificationChecks] = useState<VerificationCheck[]>([]);
+
+  // Speech Recognition Setup
+  useEffect(() => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (SpeechRecognition) {
+      recognitionRef.current = new SpeechRecognition();
+      recognitionRef.current.continuous = true;
+      recognitionRef.current.interimResults = true;
+
+      recognitionRef.current.onresult = (event: any) => {
+        let finalTranscript = '';
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          if (event.results[i].isFinal) {
+            finalTranscript += event.results[i][0].transcript;
+          }
+        }
+        if (finalTranscript) {
+          setInputText(prev => prev + (prev.length > 0 ? ' ' : '') + finalTranscript);
+        }
+      };
+
+      recognitionRef.current.onerror = (event: any) => {
+        console.error('Speech recognition error', event.error);
+        setIsRecording(false);
+        showToast(`Voice Error: ${event.error}`);
+      };
+
+      recognitionRef.current.onend = () => {
+        setIsRecording(false);
+      };
+    }
+
+    return () => {
+      if (recognitionRef.current) recognitionRef.current.stop();
+    };
+  }, []);
+
+  const toggleDictation = () => {
+    if (!recognitionRef.current) {
+      showToast("Speech recognition not supported in this browser.");
+      return;
+    }
+
+    if (isRecording) {
+      recognitionRef.current.stop();
+      setIsRecording(false);
+      showToast("Dictation stopped.");
+    } else {
+      try {
+        recognitionRef.current.start();
+        setIsRecording(true);
+        showToast("Listening for scientific context...");
+      } catch (e) {
+        console.error("Failed to start recognition", e);
+      }
+    }
+  };
 
   // Toast Helper
   const showToast = (msg: string) => {
@@ -470,17 +530,26 @@ export default function App() {
                       )}
                     </div>
                   ) : (
-                    <>
+                    <div className="relative">
                       <textarea 
                         value={inputText}
                         onChange={(e) => setInputText(e.target.value)}
                         placeholder={ingestMode === 'text' ? "Paste abstract/methodology text here..." : "Paste URLs here (one per line)..."}
                         className="w-full h-48 p-4 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none resize-none text-slate-700 font-mono text-sm leading-relaxed"
                       />
-                      <div className="absolute bottom-4 right-4 flex gap-2">
+                      <div className="absolute bottom-4 right-4 flex gap-2 items-center">
+                        {ingestMode === 'text' && (
+                          <button 
+                            onClick={toggleDictation}
+                            title={isRecording ? "Stop Dictation" : "Start Voice Dictation"}
+                            className={`p-2 rounded-full shadow-md transition-all flex items-center justify-center ${isRecording ? 'bg-red-500 text-white animate-pulse' : 'bg-indigo-100 text-indigo-600 hover:bg-indigo-200'}`}
+                          >
+                            {isRecording ? <MicOff size={18} /> : <Mic size={18} />}
+                          </button>
+                        )}
                         {!inputText && <button onClick={loadSample} className="text-xs text-indigo-600 hover:underline bg-indigo-50 px-2 py-1 rounded">Load Sample</button>}
                       </div>
-                    </>
+                    </div>
                   )}
                 </div>
                 
