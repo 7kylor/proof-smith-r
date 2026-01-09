@@ -3,7 +3,8 @@ export enum AppStage {
   DESIGN = 'DESIGN', // Ingest + Scaffold
   VALIDATE = 'VALIDATE', // Calibrate + Synthesize
   PROVE = 'PROVE', // Report
-  VERIFYING = 'VERIFYING' // Intermediate gating state
+  VERIFYING = 'VERIFYING', // Intermediate gating state
+  JOINING = 'JOINING' // Waiting room for admission
 }
 
 export interface CausalNode {

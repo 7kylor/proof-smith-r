@@ -4,11 +4,8 @@ import { CausalGraphData, RAGSource, SimulationResult, CausalNode, VerificationC
 
 // Helper to get API client
 const getClient = () => {
-  const apiKey = process.env.API_KEY;
-  if (!apiKey) {
-    console.error("API_KEY is missing from environment variables");
-  }
-  return new GoogleGenAI({ apiKey: apiKey || 'dummy-key' });
+  // Use process.env.API_KEY string directly when initializing the @google/genai client instance
+  return new GoogleGenAI({ apiKey: process.env.API_KEY });
 };
 
 export const mergeGraphs = (base: CausalGraphData, newGraph: CausalGraphData): CausalGraphData => {
