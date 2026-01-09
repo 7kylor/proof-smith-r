@@ -1,10 +1,8 @@
 
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI, Type, Modality } from "@google/genai";
 import { CausalGraphData, RAGSource, SimulationResult, CausalNode, VerificationCheck, StructuredReport } from "../types";
 
-// Helper to get API client
 const getClient = () => {
-  // Use process.env.API_KEY string directly when initializing the @google/genai client instance
   return new GoogleGenAI({ apiKey: process.env.API_KEY });
 };
 
@@ -47,116 +45,9 @@ export const mergeGraphs = (base: CausalGraphData, newGraph: CausalGraphData): C
 
 export const extractCausalScaffold = async (input: string): Promise<CausalGraphData> => {
   const ai = getClient();
-  const isUrlMode = input.trim().split(/\s+/).some(token => token.match(/^https?:\/\//));
-
-  if (isUrlMode) {
-    const prompt = `
-      You are an expert scientific analyst.
-      Task: Analyze content at the following URLs and construct a Causal Structural Model (nodes and edges).
-      URLs: ${input}
-      Output: JSON only.
-    `;
-    try {
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: prompt,
-        config: { 
-          tools: [{ googleSearch: {} }],
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              nodes: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    id: { type: Type.STRING },
-                    label: { type: Type.STRING },
-                    type: { type: Type.STRING, enum: ['variable', 'outcome', 'intervention'] }
-                  },
-                  required: ['id', 'label', 'type']
-                }
-              },
-              edges: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    source: { type: Type.STRING },
-                    target: { type: Type.STRING },
-                    relationship: { type: Type.STRING, enum: ['positive', 'negative', 'correlative'] }
-                  },
-                  required: ['source', 'target', 'relationship']
-                }
-              }
-            }
-          }
-        }
-      });
-      const parsed = JSON.parse(response.text);
-      return {
-        nodes: parsed.nodes || [],
-        edges: parsed.edges || []
-      } as CausalGraphData;
-    } catch (e) {
-      console.error("URL extraction failed", e);
-      throw e;
-    }
-  } else {
-    const prompt = `Analyze text and construct a Causal Structural Model. Text: "${input.substring(0, 4000)}"`;
-    try {
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: prompt,
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              nodes: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    id: { type: Type.STRING },
-                    label: { type: Type.STRING },
-                    type: { type: Type.STRING, enum: ['variable', 'outcome', 'intervention'] }
-                  }
-                }
-              },
-              edges: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    source: { type: Type.STRING },
-                    target: { type: Type.STRING },
-                    relationship: { type: Type.STRING, enum: ['positive', 'negative', 'correlative'] }
-                  }
-                }
-              }
-            }
-          }
-        }
-      });
-      const parsed = JSON.parse(response.text);
-      return {
-        nodes: parsed.nodes || [],
-        edges: parsed.edges || []
-      } as CausalGraphData;
-    } catch (e) {
-      console.error("Text extraction failed", e);
-      throw e;
-    }
-  }
-};
-
-export const parameterizeScaffold = async (graph: CausalGraphData): Promise<CausalGraphData> => {
-  const ai = getClient();
-  const prompt = `Assign weights and ranges to this causal graph for simulation: ${JSON.stringify(graph)}`;
+  const prompt = `Analyze text and construct a Causal Structural Model. Text: "${input.substring(0, 4000)}"`;
   try {
-     const response = await ai.models.generateContent({
+    const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
       contents: prompt,
       config: {
@@ -164,83 +55,133 @@ export const parameterizeScaffold = async (graph: CausalGraphData): Promise<Caus
         responseSchema: {
           type: Type.OBJECT,
           properties: {
-             nodes: {
-               type: Type.ARRAY,
-               items: {
-                 type: Type.OBJECT,
-                 properties: {
-                   id: { type: Type.STRING },
-                   min: { type: Type.NUMBER },
-                   max: { type: Type.NUMBER },
-                   unit: { type: Type.STRING },
-                   equation: { type: Type.STRING }
-                 }
-               }
-             },
-             edges: {
-               type: Type.ARRAY,
-               items: {
-                 type: Type.OBJECT,
-                 properties: {
-                   source: { type: Type.STRING },
-                   target: { type: Type.STRING },
-                   weight: { type: Type.NUMBER }
-                 }
-               }
-             }
+            nodes: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  id: { type: Type.STRING },
+                  label: { type: Type.STRING },
+                  type: { type: Type.STRING, enum: ['variable', 'outcome', 'intervention'] }
+                }
+              }
+            },
+            edges: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  source: { type: Type.STRING },
+                  target: { type: Type.STRING },
+                  relationship: { type: Type.STRING, enum: ['positive', 'negative', 'correlative'] }
+                }
+              }
+            }
           }
         }
       }
     });
-    const params = JSON.parse(response.text);
-    const updated = { ...graph };
-    updated.nodes = (updated.nodes || []).map(n => ({ ...n, ...(params.nodes?.find((x: any) => x.id === n.id) || {}), currentValue: 0.5 }));
-    updated.edges = (updated.edges || []).map(e => ({ ...e, ...(params.edges?.find((x: any) => x.source === e.source && x.target === e.target) || {}) }));
-    return updated;
+    const parsed = JSON.parse(response.text);
+    return {
+      nodes: parsed.nodes || [],
+      edges: parsed.edges || []
+    } as CausalGraphData;
   } catch (e) {
-    return graph;
+    console.error("Extraction failed", e);
+    throw e;
   }
 };
 
-export const expandCausalNode = async (targetNodeId: string, currentGraph: CausalGraphData): Promise<CausalGraphData> => {
+/**
+ * DEEP THINKING MODE
+ * Uses gemini-3-pro-preview with max thinking budget for complex causal reasoning.
+ */
+export const deepReasonMechanism = async (nodeLabel: string, context: CausalGraphData): Promise<string> => {
   const ai = getClient();
-  const targetNode = currentGraph.nodes.find(n => n.id === targetNodeId);
-  if (!targetNode) throw new Error("Node not found");
-  const prompt = `Expand causal model around "${targetNode.label}". Context: ${JSON.stringify(currentGraph.nodes.map(n => n.label))}`;
+  const prompt = `Perform a deep mechanistic analysis of the causal role of "${nodeLabel}" within this system: ${JSON.stringify(context)}. 
+  Explore non-linearities, hidden confounders, and feedback loops. Provide a rigorous scientific explanation.`;
+  
   try {
-     const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: prompt,
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              newNodes: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { id: { type: Type.STRING }, label: { type: Type.STRING }, type: { type: Type.STRING, enum: ['variable', 'outcome', 'intervention'] } } } },
-              newEdges: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { source: { type: Type.STRING }, target: { type: Type.STRING }, relationship: { type: Type.STRING, enum: ['positive', 'negative', 'correlative'] } } } }
+    const response = await ai.models.generateContent({
+      model: "gemini-3-pro-preview",
+      contents: prompt,
+      config: {
+        thinkingConfig: { thinkingBudget: 32768 }
+      }
+    });
+    return response.text || "Could not generate deep reasoning.";
+  } catch (e) {
+    console.error("Deep Thinking failed", e);
+    return "Error during deep reasoning session.";
+  }
+};
+
+/**
+ * NODE EXPANSION
+ * Uses gemini-3-flash-preview to discover and add related causal variables.
+ */
+export const expandCausalNode = async (nodeId: string, context: CausalGraphData): Promise<CausalGraphData> => {
+  const node = context.nodes.find(n => n.id === nodeId);
+  if (!node) return context;
+
+  const ai = getClient();
+  const prompt = `Given the current causal model: ${JSON.stringify(context)}, expand the scientific understanding around the variable "${node.label}". 
+  Identify 2-3 additional upstream or downstream biological/physical variables and their relationship types. 
+  Output as JSON representing the sub-graph.`;
+  
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            nodes: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  id: { type: Type.STRING },
+                  label: { type: Type.STRING },
+                  type: { type: Type.STRING, enum: ['variable', 'outcome', 'intervention'] }
+                }
+              }
+            },
+            edges: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  source: { type: Type.STRING },
+                  target: { type: Type.STRING },
+                  relationship: { type: Type.STRING, enum: ['positive', 'negative', 'correlative'] }
+                }
+              }
             }
           }
         }
-      });
-      const newData = JSON.parse(response.text);
-      const updated = { ...currentGraph };
-      newData.newNodes?.forEach((n: any) => {
-        const uid = `gen_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
-        const oldId = n.id; n.id = uid;
-        newData.newEdges?.forEach((e: any) => { if (e.source === oldId) e.source = uid; if (e.target === oldId) e.target = uid; });
-        updated.nodes.push({ ...n, currentValue: 0.5 });
-      });
-      if (newData.newEdges) updated.edges.push(...newData.newEdges);
-      return updated;
-  } catch (e) { return currentGraph; }
+      }
+    });
+    const parsed = JSON.parse(response.text) as CausalGraphData;
+    return mergeGraphs(context, parsed);
+  } catch (e) {
+    console.error("Node expansion failed", e);
+    return context;
+  }
 };
 
+/**
+ * SEARCH GROUNDING
+ * Uses gemini-3-flash-preview with googleSearch tool.
+ */
 export const performCalibratedRAG = async (query: string): Promise<RAGSource[]> => {
   const ai = getClient();
   try {
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: `Find and calibrate scientific evidence for: ${query}. Use search grounding to find URLs. Evaluate confidence based on methodology.`,
+      contents: `Retrieve and evaluate the latest scientific evidence for: ${query}. Focus on peer-reviewed literature and recent news.`,
       config: { tools: [{ googleSearch: {} }] }
     });
 
@@ -249,10 +190,9 @@ export const performCalibratedRAG = async (query: string): Promise<RAGSource[]> 
     
     if (webSources.length === 0) return [];
 
-    const calibrationPrompt = `For these scientific sources on "${query}", assign confidence scores (0-100) and rationale. Sources: ${JSON.stringify(webSources)}`;
     const calib = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: calibrationPrompt,
+      contents: `Calibrate these sources for rigorous scientific research: ${JSON.stringify(webSources)}`,
       config: {
         responseMimeType: "application/json",
         responseSchema: {
@@ -266,23 +206,71 @@ export const performCalibratedRAG = async (query: string): Promise<RAGSource[]> 
               confidenceScore: { type: Type.NUMBER },
               confidenceReason: { type: Type.STRING },
               methodQuality: { type: Type.STRING, enum: ["High", "Medium", "Low"] }
-            },
-            required: ['title', 'url', 'confidenceScore', 'methodQuality']
+            }
           }
         }
       }
     });
-    return (JSON.parse(calib.text) || []) as RAGSource[];
+    return JSON.parse(calib.text) || [];
   } catch (e) {
-    console.error("RAG failed", e);
     return [];
   }
 };
 
+/**
+ * TEXT TO SPEECH
+ * Uses gemini-2.5-flash-preview-tts for scientific narration.
+ */
+export const speakText = async (text: string): Promise<Uint8Array> => {
+  const ai = getClient();
+  const response = await ai.models.generateContent({
+    model: "gemini-2.5-flash-preview-tts",
+    contents: [{ parts: [{ text: `Read this scientific summary clearly and authoritatively: ${text}` }] }],
+    config: {
+      responseModalities: [Modality.AUDIO],
+      speechConfig: {
+        voiceConfig: {
+          prebuiltVoiceConfig: { voiceName: 'Kore' },
+        },
+      },
+    },
+  });
+  
+  const base64Audio = response.candidates?.[0]?.content?.parts?.find(p => p.inlineData)?.inlineData?.data;
+  if (!base64Audio) throw new Error("No audio data returned");
+  
+  const binaryString = atob(base64Audio);
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes;
+};
+
+/**
+ * NANO BANANA IMAGE EDITING
+ * Uses gemini-2.5-flash-image for scientific visualization editing.
+ */
+export const editScientificImage = async (base64Image: string, prompt: string): Promise<string> => {
+  const ai = getClient();
+  const response = await ai.models.generateContent({
+    model: 'gemini-2.5-flash-image',
+    contents: {
+      parts: [
+        { inlineData: { data: base64Image, mimeType: 'image/png' } },
+        { text: prompt },
+      ],
+    },
+  });
+
+  const part = response.candidates?.[0]?.content?.parts?.find(p => p.inlineData);
+  if (!part?.inlineData?.data) throw new Error("Image generation failed");
+  return `data:image/png;base64,${part.inlineData.data}`;
+};
+
 export const runSynthesis = async (scaffold: CausalGraphData): Promise<SimulationResult> => {
   const ai = getClient();
-  const outcome = scaffold.nodes.find(n => n.type === 'outcome') || scaffold.nodes[0];
-  const prompt = `Generate synthetic validation data for causal model: ${JSON.stringify(scaffold)}. Target: ${outcome.label}`;
+  const prompt = `Synthesize mechanistic validation data and counterfactuals for the following causal model: ${JSON.stringify(scaffold)}`;
   try {
     const response = await ai.models.generateContent({
       model: "gemini-3-pro-preview",
@@ -291,40 +279,26 @@ export const runSynthesis = async (scaffold: CausalGraphData): Promise<Simulatio
     });
     return JSON.parse(response.text) as SimulationResult;
   } catch (e) {
-    return {
-      variableName: outcome.label,
-      robustness: { bootstrapStability: 85, domainShiftResilience: 70, leaveOneOutScore: 90, identifiability: 'Strong' },
-      robustnessNarrative: "The model demonstrates high stability. Dose-response kinetics suggest consistent mechanistic effect.",
-      doseResponseData: Array.from({length: 20}, (_, i) => ({ x: i, y: (i*0.05) + (Math.random()*0.1), type: 'Observed' })),
-      bands: Array.from({length: 20}, (_, i) => ({ x: i, lower: i*0.045, upper: i*0.055 })),
-      timeCourseData: Array.from({length: 10}, (_, i) => ({ t: i, control: 0.1, treatment: 0.1 + (i*0.1) })),
-      heatmapData: Array.from({length: 96}, (_, i) => ({ row: String.fromCharCode(65 + Math.floor(i/12)), col: (i%12)+1, value: Math.random() })),
-      statistics: { pValue: 0.001, effectSize: 1.5, sampleSize: 100 }
-    };
+    throw e;
   }
 };
 
 export const runVerificationGates = async (scaffold: CausalGraphData): Promise<VerificationCheck[]> => {
   const ai = getClient();
-  try {
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: `Verify this causal model: ${JSON.stringify(scaffold.nodes.map(n => n.label))}`,
-      config: { responseMimeType: "application/json", responseSchema: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { id: { type: Type.STRING }, name: { type: Type.STRING }, status: { type: Type.STRING, enum: ['Pass', 'Fail', 'Warn'] }, message: { type: Type.STRING } } } } }
-    });
-    return JSON.parse(response.text) || [];
-  } catch (e) { return []; }
+  const response = await ai.models.generateContent({
+    model: "gemini-3-flash-preview",
+    contents: `Audit this model for logical consistency and scientific plausibility: ${JSON.stringify(scaffold)}`,
+    config: { responseMimeType: "application/json", responseSchema: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { id: { type: Type.STRING }, name: { type: Type.STRING }, status: { type: Type.STRING, enum: ['Pass', 'Fail', 'Warn'] }, message: { type: Type.STRING } } } } }
+  });
+  return JSON.parse(response.text) || [];
 };
 
 export const generateReviewerReport = async (scaffold: CausalGraphData, ragSources: RAGSource[], simulation: SimulationResult): Promise<StructuredReport> => {
   const ai = getClient();
-  const prompt = `Generate final report for: Model: ${JSON.stringify(scaffold)}, Evidence: ${JSON.stringify(ragSources)}, Sim: ${JSON.stringify(simulation.robustness)}`;
-  try {
-    const response = await ai.models.generateContent({
-      model: "gemini-3-pro-preview",
-      contents: prompt,
-      config: { responseMimeType: "application/json", responseSchema: { type: Type.OBJECT, properties: { scores: { type: Type.OBJECT, properties: { validity: { type: Type.NUMBER }, reproducibility: { type: Type.NUMBER }, robustness: { type: Type.NUMBER } } }, protocolDiffs: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { stepId: { type: Type.STRING }, original: { type: Type.STRING }, corrected: { type: Type.STRING }, rationale: { type: Type.STRING } } } }, claims: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { id: { type: Type.STRING }, claim: { type: Type.STRING }, verdict: { type: Type.STRING, enum: ['Supported', 'Disputed', 'Pending'] }, confidence: { type: Type.NUMBER }, citation: { type: Type.STRING } } } }, artifacts: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { name: { type: Type.STRING }, type: { type: Type.STRING, enum: ['code', 'dataset', 'json', 'figure'] }, size: { type: Type.STRING }, url: { type: Type.STRING }, content: { type: Type.STRING } } } }, summary: { type: Type.STRING } } } }
-    });
-    return JSON.parse(response.text);
-  } catch (e) { throw e; }
+  const response = await ai.models.generateContent({
+    model: "gemini-3-pro-preview",
+    contents: `Compile a final evidence-bound report for the following scientific model. Model: ${JSON.stringify(scaffold)}, Literature: ${JSON.stringify(ragSources)}, Sim: ${JSON.stringify(simulation)}`,
+    config: { responseMimeType: "application/json", responseSchema: { type: Type.OBJECT, properties: { scores: { type: Type.OBJECT, properties: { validity: { type: Type.NUMBER }, reproducibility: { type: Type.NUMBER }, robustness: { type: Type.NUMBER } } }, protocolDiffs: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { stepId: { type: Type.STRING }, original: { type: Type.STRING }, corrected: { type: Type.STRING }, rationale: { type: Type.STRING } } } }, claims: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { id: { type: Type.STRING }, claim: { type: Type.STRING }, verdict: { type: Type.STRING, enum: ['Supported', 'Disputed', 'Pending'] }, confidence: { type: Type.NUMBER }, citation: { type: Type.STRING } } } }, artifacts: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { name: { type: Type.STRING }, type: { type: Type.STRING, enum: ['code', 'dataset', 'json', 'figure'] }, size: { type: Type.STRING }, url: { type: Type.STRING }, content: { type: Type.STRING } } } }, summary: { type: Type.STRING } } } }
+  });
+  return JSON.parse(response.text);
 };
