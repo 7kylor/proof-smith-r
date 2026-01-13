@@ -22,7 +22,7 @@ import {
   Plus, BookOpen, FileText, Globe, Image as ImageIcon, Send, Mic, 
   Sparkles, BrainCircuit, Activity, Zap, Beaker, ChevronRight, Users, 
   Wifi, Share2, Loader2, Volume2, Info, X, Check, Search, Rocket, MessageSquare,
-  Circle, Terminal, FilePlus, Link, Type as TypeIcon
+  Circle, Terminal, FilePlus, Link, Type as TypeIcon, MicOff
 } from 'lucide-react';
 
 const COLORS = ['#4f46e5', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#8b5cf6', '#06b6d4'];
@@ -55,6 +55,10 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   
+  // Voice Dictation State
+  const [isRecording, setIsRecording] = useState(false);
+  const recognitionRef = useRef<any>(null);
+
   // Modals
   const [isAddSourceOpen, setIsAddSourceOpen] = useState(false);
   const [newSourceData, setNewSourceData] = useState({ title: '', content: '', type: 'text' as 'text' | 'url' });
@@ -117,6 +121,59 @@ export default function App() {
   }, [ydoc, myID, ySources, yScaffold]);
 
   const showToast = (m: string) => { setToast(m); setTimeout(() => setToast(null), 3000); };
+
+  // Speech Recognition Implementation
+  const handleToggleDictation = () => {
+    if (isRecording) {
+      if (recognitionRef.current) recognitionRef.current.stop();
+      return;
+    }
+
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      showToast("Voice dictation is not supported in this browser.");
+      return;
+    }
+
+    try {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = true;
+      recognition.lang = 'en-US';
+
+      recognition.onstart = () => {
+        setIsRecording(true);
+      };
+
+      recognition.onresult = (event: any) => {
+        const transcript = Array.from(event.results)
+          .map((result: any) => result[0])
+          .map((result: any) => result.transcript)
+          .join('');
+        setCurrentInput(transcript);
+      };
+
+      recognition.onerror = (event: any) => {
+        setIsRecording(false);
+        const error = event.error;
+        if (error === 'not-allowed') showToast("Microphone permission denied.");
+        else if (error === 'no-speech') showToast("No speech was detected.");
+        else if (error === 'network') showToast("Network error detected during transcription.");
+        else if (error === 'aborted') return;
+        else showToast(`Dictation Error: ${error}`);
+      };
+
+      recognition.onend = () => {
+        setIsRecording(false);
+      };
+
+      recognitionRef.current = recognition;
+      recognition.start();
+    } catch (e) {
+      console.error(e);
+      showToast("Failed to initialize speech recognition.");
+    }
+  };
 
   const handleCreateSource = async () => {
     if (!newSourceData.title || !newSourceData.content) return;
@@ -473,7 +530,21 @@ export default function App() {
 
         {/* BOTTOM CHAT: GROUNDED INTERACTION INTERFACE */}
         <div className="absolute bottom-10 left-1/2 -translate-x-1/2 w-full max-w-4xl px-8 z-30">
-          <div className="bg-white/95 backdrop-blur-3xl border border-slate-200 rounded-[3rem] shadow-2xl p-2 flex items-center gap-3 group focus-within:ring-8 focus-within:ring-indigo-500/5 focus-within:border-indigo-400 transition-all">
+          <div className="bg-white/95 backdrop-blur-3xl border border-slate-200 rounded-[3rem] shadow-2xl p-2 flex items-center gap-3 group focus-within:ring-8 focus-within:ring-indigo-500/5 focus-within:border-indigo-400 transition-all relative">
+            
+            {/* Recording Feedback Overlay */}
+            {isRecording && (
+              <div className="absolute inset-0 bg-white/60 backdrop-blur-sm rounded-[3rem] flex items-center px-10 pointer-events-none animate-in fade-in duration-300 z-10">
+                <div className="flex items-center gap-4">
+                  <div className="flex gap-1.5 items-center">
+                    <div className="w-2 h-2 bg-red-500 rounded-full animate-ping"></div>
+                    <div className="w-2 h-2 bg-red-500 rounded-full"></div>
+                  </div>
+                  <span className="text-sm font-black text-slate-400 uppercase tracking-widest animate-pulse">Listening... Speak now</span>
+                </div>
+              </div>
+            )}
+
             <button 
               onClick={() => setIsThinking(!isThinking)}
               className={`h-14 px-6 rounded-[2.5rem] transition-all flex items-center gap-3 ${isThinking ? 'bg-slate-900 text-white shadow-xl' : 'bg-slate-100 text-slate-400 hover:text-indigo-600 hover:bg-white hover:border-slate-200'}`}
@@ -486,12 +557,18 @@ export default function App() {
               value={currentInput}
               onChange={(e) => setCurrentInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
-              placeholder={sources.length === 0 ? "Add a source to start chatting..." : "Ask your sources about mechanisms..."}
+              placeholder={sources.length === 0 ? "Add a source to start chatting..." : (isRecording ? "" : "Ask your sources about mechanisms...")}
               disabled={sources.length === 0}
               className="flex-1 bg-transparent border-none outline-none px-6 text-sm font-bold text-slate-800 placeholder:text-slate-400 disabled:cursor-not-allowed"
             />
             <div className="flex items-center gap-2 pr-2">
-               <button className="h-14 w-14 flex items-center justify-center text-slate-400 hover:text-indigo-600 transition-all"><Mic size={20}/></button>
+               <button 
+                onClick={handleToggleDictation}
+                className={`h-14 w-14 flex items-center justify-center transition-all rounded-full ${isRecording ? 'bg-red-50 text-red-600 shadow-inner' : 'text-slate-400 hover:text-indigo-600'}`}
+                title={isRecording ? "Stop Recording" : "Start Dictation"}
+               >
+                 {isRecording ? <MicOff size={20} className="animate-pulse" /> : <Mic size={20}/>}
+               </button>
                <button 
                 onClick={handleSendMessage}
                 disabled={loading || sources.length === 0 || !currentInput}
