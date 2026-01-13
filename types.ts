@@ -1,10 +1,26 @@
 
 export enum AppStage {
-  DESIGN = 'DESIGN', // Ingest + Scaffold
-  VALIDATE = 'VALIDATE', // Calibrate + Synthesize
-  PROVE = 'PROVE', // Report
-  VERIFYING = 'VERIFYING', // Intermediate gating state
-  JOINING = 'JOINING' // Waiting room for admission
+  NOTEBOOK = 'NOTEBOOK',
+  DESIGN = 'DESIGN', 
+  VALIDATE = 'VALIDATE', 
+  PROVE = 'PROVE', 
+  JOINING = 'JOINING' 
+}
+
+export interface Source {
+  id: string;
+  type: 'text' | 'url' | 'image' | 'file';
+  title: string;
+  content: string; // base64 for image, raw text for others
+  mimeType?: string;
+  metadata?: any;
+}
+
+export interface ChatMessage {
+  role: 'user' | 'model';
+  text: string;
+  citations?: string[];
+  isThinking?: boolean;
 }
 
 export interface CausalNode {
@@ -41,80 +57,41 @@ export interface RAGSource {
   methodQuality: 'High' | 'Medium' | 'Low';
 }
 
-export interface SyntheticPoint {
-  x: number;
-  y: number;
-  type: 'Observed' | 'Synthetic' | 'Counterfactual';
-}
-
-export interface TimePoint {
-  t: number;
-  control: number;
-  treatment: number;
-}
-
+// Fix: Added missing export for HeatmapCell
 export interface HeatmapCell {
   row: string;
   col: number;
   value: number;
 }
 
-export interface ConfidenceBandPoint {
-  x: number;
-  lower: number;
-  upper: number;
-}
-
-export interface RobustnessMetrics {
-  bootstrapStability: number;
-  domainShiftResilience: number;
-  leaveOneOutScore: number;
-  identifiability: 'Strong' | 'Weak' | 'None';
-}
-
 export interface SimulationResult {
   variableName: string;
-  doseResponseData: SyntheticPoint[];
-  bands: ConfidenceBandPoint[];
-  timeCourseData: TimePoint[];
+  doseResponseData: any[];
+  bands: any[];
+  timeCourseData: any[];
   heatmapData: HeatmapCell[];
   statistics: {
     pValue: number;
     effectSize: number;
     sampleSize: number;
   };
-  robustness: RobustnessMetrics;
+  robustness: any;
   robustnessNarrative?: string; 
 }
 
-export interface VerificationCheck {
-  id: string;
-  name: string;
-  status: 'Pass' | 'Fail' | 'Warn';
-  message: string;
-}
-
-export interface ProtocolDiff {
-  stepId: string;
-  original: string;
-  corrected: string;
-  rationale: string;
-}
-
+// Fix: Added missing export for ClaimCard
 export interface ClaimCard {
-  id: string;
   claim: string;
   verdict: 'Supported' | 'Disputed' | 'Pending';
-  confidence: number;
   citation: string;
 }
 
+// Fix: Added missing export for Artifact
 export interface Artifact {
   name: string;
-  type: 'code' | 'dataset' | 'json' | 'figure';
+  type: 'code' | 'dataset' | 'report';
   size: string;
-  url?: string;
-  content?: string; 
+  content?: string;
 }
 
 export interface StructuredReport {
@@ -123,8 +100,15 @@ export interface StructuredReport {
     reproducibility: number;
     robustness: number;
   };
-  protocolDiffs: ProtocolDiff[];
+  protocolDiffs: any[];
   claims: ClaimCard[];
   artifacts: Artifact[];
   summary: string;
+}
+
+export interface VerificationCheck {
+  id: string;
+  name: string;
+  status: 'Pass' | 'Fail' | 'Warn';
+  message: string;
 }
